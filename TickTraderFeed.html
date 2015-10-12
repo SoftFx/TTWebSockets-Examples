@@ -1,0 +1,1021 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Node Test</title>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/core-min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/enc-base64-min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/hmac-sha256.js" type='text/javascript'></script>
+    <meta charset="utf-8">
+  </head>
+  <script>
+
+window.onload = Initialize;
+
+function Initialize() {
+  if (!("WebSocket" in window)) {  
+    alert("Sorry, no WebSockets!");
+    return;
+  }
+
+  document.getElementById("webSocketApiConnect").disabled = false;
+
+  var connectButton = document.getElementById("webSocketApiConnect");
+  connectButton.onclick = function() { IsConnected() ? Disconnect() : Connect(); };
+  var clearButton = document.getElementById("console-clear");
+  clearButton.onclick = function() { ClearConsole(); };
+}
+
+function CreateGuid() {
+  // http://www.ietf.org/rfc/rfc4122.txt
+  var s = [];
+  var hexDigits = "0123456789abcdef";
+  for (var i = 0; i < 36; i++) {
+    s[i] = hexDigits.substr(Math.floor(Math.random() * 0x10), 1);
+  }
+  // bits 12-15 of the time_hi_and_version field to 0010
+  s[14] = "4"; 
+  // bits 6-7 of the clock_seq_hi_and_reserved to 01
+  s[19] = hexDigits.substr((s[19] & 0x3) | 0x8, 1);  
+  s[8] = s[13] = s[18] = s[23] = "-";
+  return s.join("");
+}
+
+function GetTimestamp() {
+  var timestamp = new Date();
+  day = timestamp.getUTCDate();
+  month = timestamp.getUTCMonth();
+  month = month + 1;
+  if ((String(day)).length == 1)
+    day = '0' + day;
+  if ((String(month)).length == 1)
+    month = '0' + month;
+  hours = timestamp.getUTCHours();
+  if ((String(hours)).length == 1)
+    hours = '0' + hours;
+  minutes = timestamp.getUTCMinutes();
+  if ((String(minutes)).length == 1)
+    minutes = '0' + minutes;
+  seconds = timestamp.getUTCSeconds();
+  if ((String(seconds)).length == 1)
+    seconds = '0' + seconds;
+  milliseconds = timestamp.getUTCSeconds();
+  if ((String(milliseconds)).length == 1)
+    milliseconds = '00' + milliseconds;
+  else if ((String(milliseconds)).length == 2)
+    milliseconds = '0' + milliseconds;
+  return timestamp.getUTCFullYear() + '.' + month + '.' + day + ' ' + hours + ':' + minutes + ':' + seconds + '.' + milliseconds;
+}
+
+function WriteConsole(value) {
+  var console = document.getElementById("console-text");
+  console.value += GetTimestamp() + ' ' + value + '\n';
+  console.scrollTop = console.scrollHeight;
+}
+
+function ClearConsole() {
+  var console = document.getElementById("console-text");
+  console.value = "";
+  console.scrollTop = console.scrollHeight;
+}
+
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+
+var logon = false;
+var socket = null;
+
+function IsConnected() {
+  return socket != null;
+}
+
+function IsLogon() {
+  return logon;
+}
+
+function Connect() {
+  try {  
+    var address = document.getElementById("webSocketApiAddress").value;
+    var id = document.getElementById("webSocketApiId").value;
+    var key = document.getElementById("webSocketApiKey").value;
+    var secret = document.getElementById("webSocketApiSecret").value;
+    var timestamp = Date.now();
+    var signature = CreateSignature(timestamp, id, key, secret);
+
+    socket = new WebSocket(address);  
+    WriteConsole('Socket state: ' + socket.readyState); 
+    socket.onopen = function() {
+      document.getElementById("webSocketApiConnect").value = "Disconnect";
+      WriteConsole('Socket state: ' + socket.readyState + ' (open)'); 
+      var request = {
+        Id: CreateGuid(),
+        Request: "Login",
+        Params: {
+          AuthType: "HMAC",
+          WebApiId: id,
+          WebApiKey: key,
+          Timestamp: timestamp,
+          Signature: signature
+        }
+      };
+      Send(request);
+    }  
+    socket.onmessage = function(msg) { 
+      if (!IsLogon())
+        Logon();
+      Recieve(msg.data) 
+    }  
+    socket.onclose = function() {  
+      if (IsLogon())
+        Logout();
+      document.getElementById("webSocketApiConnect").value = "Connect";
+      WriteConsole('Socket state: ' + socket.readyState + ' (closed)');  
+      socket = null;
+    }           
+  } catch(exception) {  
+    WriteConsole('Error: ' + exception.text);
+  }  
+}
+
+function Disconnect() {
+  socket.close();
+}
+
+function Logon() {
+  logon = true;
+  EnableButtons(true);
+}
+
+function Logout() {
+  logon = false;
+  EnableButtons(false);
+}
+
+function EnableButtons(enabled) {
+  document.getElementById("example-disconnect-send").disabled = !enabled;
+  document.getElementById("example-sessioninfo-send").disabled = !enabled;
+  document.getElementById("example-currency-all-send").disabled = !enabled;
+  document.getElementById("example-currency-by-name-send").disabled = !enabled;
+  document.getElementById("example-symbol-all-send").disabled = !enabled;
+  document.getElementById("example-symbol-by-name-send").disabled = !enabled;
+  document.getElementById("example-feed-subscribe-send").disabled = !enabled;
+  document.getElementById("example-feed-unsubscribe-send").disabled = !enabled;
+}
+
+function Send(request) {
+  var jsonrequest = JSON.stringify(request);
+  socket.send(jsonrequest);
+  WriteConsole('Sent: ' + jsonrequest);  
+}
+
+function Recieve(response) {
+  WriteConsole('Received: ' + response);  
+}
+
+function ExampleRequest(id) {
+  var jsonrequest = document.getElementById(id).value;
+  var request = JSON.parse(jsonrequest);
+  Send(request);
+}
+
+  </script>
+  <style>
+    html {
+      height: 100%;
+    }
+    body {
+      margin: 0; 
+      padding: 0; 
+      height: 100%;
+    }
+    .anchor { 
+    }
+    .code { 
+      background: #F8F8FF; 
+      border: black dashed 1px; 
+      padding: 6px
+    }
+    #wrapper {
+      width: 100%;
+      min-width: 1250px;
+      min-height: 100%;
+      margin: auto;
+      position: relative;
+    }
+    * html #wrap {
+      height: 100%
+    }
+    #inner-wrap {
+      padding-bottom: 85px;
+    }
+    #inner-wrap:after {
+      content: " ";
+      display: block;
+      clear: both;
+    }
+    * html #inner-wrap {
+      height: 1px;
+    }
+    #header {
+      background: #0F6AB4;
+      border-radius: 0px 0px 10px 10px;
+      position: fixed; 
+      top: 0;
+      height: 80px !important;
+      width: 100%;
+      min-width: 1250px;
+      margin: 0px 20px 25px 20px;
+    }
+    #header-title {
+      float: left;
+      color: white;
+      font-size: large;
+      padding: 25px 20px 0px 20px;
+    }
+    #login-form {
+      margin: 25px 40px 0px 20px;
+      float: right;
+    }
+    #webSocketApiAddress {
+      width: 200px;
+    }
+    #webSocketApiId {
+      width: 260px;
+    }
+    #webSocketApiKey {
+      width: 150px;
+    }
+    #webSocketApiSecret {
+      width: 200px;
+    }
+    #webSocketApiConnect {
+      width: 100px;
+    }
+    #content {
+    }
+    #console-wrapper {
+      float: right;
+      width: 450px;
+    }
+    #console {
+      background-color: #eee;
+      position: fixed;
+      right: 20px;
+      top: 100px;
+      width: 450px;
+      height: 550px;
+      z-index: 100;
+      padding: 5px 5px 5px 5px;
+    }
+    #console-header {
+      padding: 5px 5px 5px 5px;
+    }
+    #console-clear {
+      float: right;
+    }
+    #console-body {
+      padding: 5px 10px 5px 5px;
+    }
+    #console-text {
+      resize: none;
+      width: 100%;
+    }
+    #documentation {
+      margin-top: 100px;
+      margin-left: 30px;
+      margin-right: 500px;
+    }
+    #footer {
+      background: #0F6AB4;
+      position: absolute;
+      width: 100%;
+      left: 0px;
+      bottom: 0px;
+      margin: 25px 0px 0px 0px;
+    }
+    #footer-copyright {
+      color: white;
+      margin: 0px 20px 0px 20px;
+    }
+  </style>
+  <body>
+    <div id="wrapper">
+      <div id="header">
+        <div id="header-title">Feeder WebSockets</div>
+        <form id="login-form">
+          <input placeholder="wss://ttdemowebapi.soft-fx.com:2083" id="webSocketApiAddress" name="webSocketApiAddress" type="text" value=""/>
+          <input placeholder="Web API Id" id="webSocketApiId" name="webSocketApiId" type="text" value=""/>
+          <input placeholder="Web API Key" id="webSocketApiKey" name="webSocketApiKey" type="text" value=""/>
+          <input placeholder="Web API Secret" id="webSocketApiSecret" name="webSocketApiSecret" type="text" value=""/>
+          <input id="webSocketApiConnect" type="button" value="Connect" disabled="true"/>
+        </form>
+      </div>
+      <div id="inner-wrap">
+        <div id="content">
+          <div id="console">
+            <div id="console-header">
+              <form id="console-form">
+                <b id="console-form-title">WebSocket console</b>
+                <input id="console-clear" type="button" value="Clear"/>
+              </form>
+            </div>                    
+            <div id="console-body">
+              <textarea id="console-text" rows="33" readonly="true"></textarea>
+            </div>                    
+          </div>          
+          <div id="console-wrapper">
+          </div>          
+        </div>
+          <div id="documentation">
+            <h1>TickTrader Feeder WebSocket API</h1>
+            <p>
+              TickTrader Feeder WebSocket API is used to connect to the TickTrader Server using 
+              <a href="https://en.wikipedia.org/wiki/WebSocket" target="_blank">secure web sockets technology (wss://)</a> 
+              to get feed information (currencies, symbols) and subscribe to real-time feed ticks.
+            </p>
+            <h2>Contents</h2>
+              <ul>
+                <li>
+                  <a href="#connect">Connect and login</a>
+                  <ul>
+                    <li><a href="#login-request">Login request</a></li>
+                    <li><a href="#login-response">Login response</a></li>
+                    <li><a href="#login-error">Login error</a></li>
+                    <li><a href="#authentication">Authentication</a></li>
+                    <li><a href="#example-connect">Example: Connect and login</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#disconnect">Disconnect</a>
+                  <ul>
+                    <li><a href="#example-disconnect">Example: Disconnect</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#session-information">Session information</a>
+                  <ul>
+                    <li><a href="#session-information-request">Session information request</a></li>
+                    <li><a href="#session-information-response">Session information response</a></li>
+                    <li><a href="#session-information-error">Session information error</a></li>
+                    <li><a href="#example-sessioninfo">Example: Session information</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#currency-information">Currency information</a>
+                  <ul>
+                    <li><a href="#currency-information-request">Currency information request</a></li>
+                    <li><a href="#currency-information-response">Currency information response</a></li>
+                    <li><a href="#currency-information-error">Currency information error</a></li>
+                    <li><a href="#example-currency-all">Example: Get all currencies information</a></li>
+                    <li><a href="#example-currency-by-name">Example: Get currency by name</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#symbols-information">Symbols information</a>
+                  <ul>
+                    <li><a href="#symbols-information-request">Symbols information request</a></li>
+                    <li><a href="#symbols-information-response">Symbols information response</a></li>
+                    <li><a href="#symbols-information-error">Symbols information error</a></li>
+                    <li><a href="#example-symbol-all">Example: Get all symbols information</a></li>
+                    <li><a href="#example-symbol-by-name">Example: Get symbol by name</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#feed-subscribe">Feed subscribe</a>
+                  <ul>
+                    <li><a href="#feed-subscribe-request">Feed subscribe request</a></li>
+                    <li><a href="#feed-subscribe-response">Feed subscribe response</a></li>
+                    <li><a href="#feed-subscribe-error">Feed subscribe error</a></li>
+                    <li><a href="#example-feed-subscribe">Example: Subscribe to symbols feed ticks</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#feed-unsubscribe">Feed unsubscribe</a>
+                  <ul>
+                    <li><a href="#feed-unsubscribe-request">Feed unsubscribe request</a></li>
+                    <li><a href="#feed-unsubscribe-response">Feed unsubscribe response</a></li>
+                    <li><a href="#feed-unsubscribe-error">Feed unsubscribe error</a></li>
+                    <li><a href="#example-feed-unsubscribe">Example: Unsubscribe from symbols feed ticks</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#notifications">Notifications</a>
+                  <ul>
+                    <li><a href="#notification-sessioninfo">Notification: Session information</a></li>
+                    <li><a href="#notification-feed-tick">Notification: Feed tick update</a></li>
+                  </ul>
+                </li>
+              </ul>
+            <h2><a class="anchor" name="connect">Connect and login</a></h2>
+            <p>
+              Connection operation is perfromed in two phases. First you need to create and instance of WebSocket object and
+              provide an address to connect. Then you should perfrom HMAC authentication in 'onopen' event handler.
+            </p>
+            <h3><a class="anchor" name="login-request">Login request</a></h3>
+            <p>
+              Login request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Login",
+  "Params": {
+    "AuthType": "HMAC",
+    "WebApiId":  &lt;Web API Id&gt;,
+    "WebApiKey": &lt;Web API Key&gt;,
+    "Timestamp": &lt;timestamp (e.g. Date.now())&gt;,
+    "Signature": &lt;signature&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="login-response">Login response</a></h3>
+            <p>
+              Success Login response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Login",
+  "Result": "ok"
+}
+              </code></pre>
+              Just after login response you will recieve <a href="#notification-sessioninfo">session information notification</a>!
+            </p>
+            <h3><a class="anchor" name="login-error">Login error</a></h3>
+            <p>
+              Error Login response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="authentication">Authentication</a></h3>
+            <p>
+              Signature should be calculated from "&lt;timestamp&gt;+&lt;id&gt;+&lt;key&gt;" with the "&lt;secret&gt;" 
+              using HMAC/SHA256 with BASE64 encoding. For example you can use <a href="https://code.google.com/p/crypto-js/" target="_blank">Crypto-JS API</a>
+              to calculate the required signature:
+              <pre class="code"><code>
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-connect">Example: Connect and login</a></h3>
+            <p>
+              Below you will find a complete JavaScript code fragment which connectes to TickTrader Server using WebSockets technology:
+              <pre class="code"><code>
+&lt;script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/core-min.js" type='text/javascript'>&lt;/script&gt;
+&lt;script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/enc-base64-min.js" type='text/javascript'>&lt;/script&gt;
+&lt;script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/hmac-sha256.js" type='text/javascript'>&lt;/script&gt;
+
+&lt;script&gt;
+
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+
+var socket = null;
+
+function Connect(address, id, key, secret) {
+  try {  
+    var timestamp = Date.now();
+    var signature = CreateSignature(timestamp, id, key, secret);
+
+    socket = new WebSocket(address);  
+    console.log('Socket state: ' + socket.readyState); 
+    socket.onopen = function() {
+      console.log('Socket state: ' + socket.readyState + ' (open)'); 
+      var request = {
+        Id: "8AF57382-DE83-49DC-9B4E-CF9FF4A4A798",
+        Request: "Login",
+        Params: {
+          AuthType: "HMAC",
+          WebApiId: id,
+          WebApiKey: key,
+          Timestamp: timestamp,
+          Signature: signature
+        }
+      };
+      var jsonrequest = JSON.stringify(request);
+      socket.send(jsonrequest);
+    }  
+    socket.onmessage = function(msg) { 
+      console.log(msg.data);
+    }  
+    socket.onclose = function() {  
+      console.log('Socket state: ' + socket.readyState + ' (closed)');  
+      socket = null;
+    }           
+  } catch(exception) {  
+    console.log('Error: ' + exception.text);
+  }  
+}
+
+&lt;/script&gt;
+              </code></pre>
+            </p>
+            <h2><a class="anchor" name="disconnect">Disconnect</a></h2>
+            <p>
+              Disconnection from WebSockets interface is performed simply by closing web socket object:
+              <pre class="code"><code>
+function Disconnect() {
+  socket.close();
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-disconnect">Example: Disconnect</a></h3>
+            <form id="example-disconnect-form">
+              <input id="example-disconnect-send" type="button" value="Disconnect" disabled="true" onclick="Disconnect()"/>
+            </form>
+            <h2><a class="anchor" name="session-information">Session information</a></h2>
+            <p>
+              Feed session contains information about TickTrader Server configuration and working time.
+            </p>
+            <h3><a class="anchor" name="session-information-request">Session information request</a></h3>
+            <p>
+              Session information request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "SessionInfo"
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="session-information-response">Session information response</a></h3>
+            <p>
+              Success Session information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "SessionInfo",
+  "Result": {
+    "PlatformName": "TickTrader Demo Server",
+    "PlatformCompany": "Soft-FX",
+    "PlatformAddress": "ttdemo.soft-fx.com",
+    "PlatformTimezoneOffset": 3,
+    "SessionId": "e36c076b-4e38-472d-b271-017a4152f09e",
+    "SessionStatus": "Opened",
+    "SessionStartTime": 1443722400000,
+    "SessionEndTime": 253402297200000,
+    "SessionOpenTime": 1443722400000,
+    "SessionCloseTime": 253402297200000
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="session-information-error">Session information error</a></h3>
+            <p>
+              Error Session information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-sessioninfo">Example: Session information</a></h3>
+            <form id="example-sessioninfo-form">
+              <textarea id="example-sessioninfo-request" rows="5" cols="80">
+{
+  "Id": "A6B103E2-E3B4-4E27-A2EE-1BABD75206AA",
+  "Request": "SessionInfo"
+}
+              </textarea><br/>
+              <input id="example-sessioninfo-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-sessioninfo-request')"/>
+            </form>
+            <h2><a class="anchor" name="currency-information">Currency information</a></h2>
+            <p>
+              Access to the currency list in TickTrader Server.
+            </p>
+            <h3><a class="anchor" name="currency-information-request">Currency information request</a></h3>
+            <p>
+              To get all avaliable currencies request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Currencies"
+}
+              </code></pre>
+            </p>
+            <p>
+              To get currency information by its name request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Currencies",
+  "Params": {
+    "Currency": &lt;currency&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="currency-information-response">Currency information response</a></h3>
+            <p>
+              Currency information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Currencies",
+  "Result": {
+    "Currencies": [{
+      "Name": "USD",
+      "Precision": 2,
+      "Description": "United States Dollar"
+    }, {
+      "Name": "EUR",
+      "Precision": 2,
+      "Description": "Euro"
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="currency-information-error">Currency information error</a></h3>
+            <p>
+              Error currency information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-currency-all">Example: Get all currencies information</a></h3>
+            <form id="example-currency-all-form">
+              <textarea id="example-currency-all-request" rows="5" cols="80">
+{
+  "Id": "DD8EFB75-69BA-4E89-9106-4FE73DAAC5FD",
+  "Request": "Currencies"
+}
+              </textarea><br/>
+              <input id="example-currency-all-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-currency-all-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-currency-by-name">Example: Get currency by name</a></h3>
+            <form id="example-currency-by-name-form">
+              <textarea id="example-currency-by-name-request" rows="8" cols="80">
+{
+  "Id": "F7F7F977-0E18-4273-9BEB-3DAF1233C659",
+  "Request": "Currencies",
+  "Params": {
+    "Currency": "USD"
+  }
+}
+              </textarea><br/>
+              <input id="example-currency-by-name-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-currency-by-name-request')"/>
+            </form>
+            <h2><a class="anchor" name="symbols-information">Symbols information</a></h2>
+            <p>
+               Access to the symbols list in TickTrader Server.
+            </p>
+            <h3><a class="anchor" name="symbols-information-request">Symbols information request</a></h3>
+            <p>
+              To get all avaliable symbols request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Symbols"
+}
+              </code></pre>
+            </p>
+            <p>
+              To get symbol information by its name request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Symbols",
+  "Params": {
+    "Symbol": &lt;symobl&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="symbols-information-response">Symbols information response</a></h3>
+            <p>
+              Symbols information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Symbols",
+  "Result": {
+    "Symbols": [{
+       "Symbol": "EURUSD",
+       "Precision": 5,
+       "IsTradeAllowed": true,
+       "MarginMode": "Forex",
+       "ProfitMode": "Forex",
+       "ContractSize": 100000,
+       "MarginHedged": 0.5,
+       "MarginFactor": 1,
+       "MarginCurrency": "EUR",
+       "MarginCurrencyPrecision": 2,
+       "ProfitCurrency": "USD",
+       "ProfitCurrencyPrecision": 2,
+       "Description": "Euro vs US Dollar",
+       "SwapEnabled": true,
+       "SwapSizeShort": 2.23,
+       "SwapSizeLong": 2.32,
+       "MinTradeAmount": 1000.00,
+       "MaxTradeAmount": 10000000,
+       "TradeAmountStep": 1000.00,
+       "CommissionType": "Percentage",
+       "CommissionChargeType": "PerLot",
+       "CommissionChargeMethod": "RoundTurn",
+       "Commission": 0.005,
+       "LimitsCommission": 0.005
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="symbols-information-error">Symbols information error</a></h3>
+            <p>
+              Error symbols information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-symbol-all">Example: Get all symbols information</a></h3>
+            <form id="example-symbol-all-form">
+              <textarea id="example-symbol-all-request" rows="5" cols="80">
+{
+  "Id": "E9761F65-2E52-4AB9-B7AC-0979DBDBA3D4",
+  "Request": "Symbols"
+}
+              </textarea><br/>
+              <input id="example-symbol-all-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-symbol-all-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-symbol-by-name">Example: Get symbol by name</a></h3>
+            <form id="example-symbol-by-name-form">
+              <textarea id="example-symbol-by-name-request" rows="8" cols="80">
+{
+  "Id": "8E8D4BCB-0A6C-472D-8808-D279FA986135",
+  "Request": "Symbols",
+  "Params": {
+    "Symbol": "EURUSD"
+  }
+}
+              </textarea><br/>
+              <input id="example-symbol-by-name-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-symbol-by-name-request')"/>
+            </form>
+            <h2><a class="anchor" name="feed-subscribe">Feed subscribe</a></h2>
+            <p>
+               Subscribe to feed ticks updates in TickTrader Server.
+            </p>
+            <h3><a class="anchor" name="feed-subscribe-request">Feed subscribe request</a></h3>
+            <p>
+              Feed subscribe request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "FeedSubscribe",
+  "Params": {
+    "Subscribe": [{
+      "Symbol": &lt;symobl 1&gt;,
+      "BookDepth": &lt;book depth 1&gt;
+    }, {
+      "Symbol": &lt;symobl N&gt;,
+      "BookDepth": &lt;book depth N&gt;
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="feed-subscribe-response">Feed subscribe response</a></h3>
+            <p>
+              Feed subscribe response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "FeedSubscribe",
+  "Result": {
+    "Snapshot": [{
+      "Symbol": "EURUSD",
+      "Timestamp": 1443789754160,
+      "BestBid": {
+        "Type": "Bid",
+        "Price": 1.12912,
+        "Volume": 1000000
+      },
+      "BestAsk": {
+        "Type": "Ask",
+        "Price": 1.12913,
+        "Volume": 1000000
+      },
+      "Bids": [{
+        "Type": "Bid",
+        "Price": 1.12912,
+        "Volume": 1000000
+      }, {
+        "Type": "Bid",
+        "Price": 1.12911,
+        "Volume": 2500000
+      }, {
+        "Type": "Bid",
+        "Price": 1.1291,
+        "Volume": 3700000
+      }],
+      "Asks": [{
+        "Type": "Ask",
+        "Price": 1.12913,
+        "Volume": 1000000
+      }, {
+        "Type": "Ask",
+        "Price": 1.12914,
+        "Volume": 500000
+      }, {
+        "Type": "Ask",
+        "Price": 1.12915,
+        "Volume": 2550000
+      }]
+    }]
+  }
+}
+              </code></pre>
+              After feed subscribe response response you will start to recieve <a href="#notification-feed-tick">feed tick update notifications</a>!
+            </p>
+            <h3><a class="anchor" name="feed-subscribe-error">Feed subscribe error</a></h3>
+            <p>
+              Error feed subscribe response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-feed-subscribe">Example: Subscribe to symbols feed ticks</a></h3>
+            <form id="example-feed-subscribe-form">
+              <textarea id="example-feed-subscribe-request" rows="14" cols="80">
+{
+  "Id": "A03DF33D-E520-483B-892F-73C671127BC2",
+  "Request": "FeedSubscribe",
+  "Params": {
+    "Subscribe": [{
+      "Symbol": "EURUSD",
+      "BookDepth": 3
+    }, {
+      "Symbol": "USDJPY",
+      "BookDepth": 3
+    }]
+  }
+}
+              </textarea><br/>
+              <input id="example-feed-subscribe-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-feed-subscribe-request')"/>
+            </form>
+            <h2><a class="anchor" name="feed-unsubscribe">Feed unsubscribe</a></h2>
+            <p>
+               Unsubscribe from feed ticks updates in TickTrader Server.
+            </p>
+            <h3><a class="anchor" name="feed-unsubscribe-request">Feed unsubscribe request</a></h3>
+            <p>
+              Feed unsubscribe request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "FeedSubscribe",
+  "Params": {
+    "Unsubscribe": [
+      &lt;symobl 1&gt;,
+      &lt;symobl N&gt;
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="feed-unsubscribe-response">Feed unsubscribe response</a></h3>
+            <p>
+              Feed unsubscribe response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "FeedSubscribe",
+  "Result": {
+    "Snapshot": []
+  }
+}
+              </code></pre>
+              After feed unsubscribe response response you will stop to recieve <a href="#notification-feed-tick">feed tick update notifications</a>!
+            </p>
+            <h3><a class="anchor" name="feed-unsubscribe-error">Feed unsubscribe error</a></h3>
+            <p>
+              Error feed unsubscribe response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-feed-unsubscribe">Example: Unsubscribe from symbols feed ticks</a></h3>
+            <form id="example-feed-unsubscribe-form">
+              <textarea id="example-feed-unsubscribe-request" rows="11" cols="80">
+{
+  "Id": "8AB3256A-A57E-4215-8EF7-FEDC13ABED12",
+  "Request": "FeedSubscribe",
+  "Params": {
+    "Unsubscribe": [
+      "EURUSD",
+      "USDJPY"
+    ]
+  }
+}
+              </textarea><br/>
+              <input id="example-feed-unsubscribe-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-feed-unsubscribe-request')"/>
+            </form>
+            <h2><a class="anchor" name="notifications">Notifications</a></h2>
+            <h3><a class="anchor" name="notification-sessioninfo">Notification: Session information</a></h3>
+            <p>
+              When Feed session state is changed TickTrader Server will send corresponding notification. 
+              You will recieve this notification after successfull login as well!
+              <pre class="code"><code>
+{
+  "Response": "SessionInfo",
+  "Result": {
+    "PlatformName": "TickTrader Demo Server",
+    "PlatformCompany": "Soft-FX",
+    "PlatformAddress": "ttdemo.soft-fx.com",
+    "PlatformTimezoneOffset": 3,
+    "SessionId": "e36c076b-4e38-472d-b271-017a4152f09e",
+    "SessionStatus": "Opened",
+    "SessionStartTime": 1443787200000,
+    "SessionEndTime": 253402297200000,
+    "SessionOpenTime": 1443787200000,
+    "SessionCloseTime": 253402297200000
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="notification-feed-tick">Notification: Feed tick update</a></h3>
+            <p>
+              After subscription to some symbol in TickTrader Server you will recieve the following notifications
+              with a new feed tick value. Count of 'Bids' and 'Asks' collections are similar to the subscription
+              book depth.
+              <pre class="code"><code>
+{
+  "Response": "FeedTick",
+  "Result": {
+    "Symbol": "EURUSD",
+    "Timestamp": 1443789756132,
+    "BestBid": {
+      "Type": "Bid",
+      "Price": 1.12906,
+      "Volume": 550000
+    },
+    "BestAsk": {
+      "Type": "Ask",
+      "Price": 1.12908,
+      "Volume": 2000000
+    },
+    "Bids": [{
+      "Type": "Bid",
+      "Price": 1.12906,
+      "Volume": 550000
+    }, {
+      "Type": "Bid",
+      "Price": 1.12905,
+      "Volume": 1500000
+    }, {
+      "Type": "Bid",
+      "Price": 1.12904,
+      "Volume": 6000000
+    }],
+    "Asks": [{
+     "Type": "Ask",
+     "Price": 1.12908,
+     "Volume": 2000000
+    }, {
+     "Type": "Ask",
+     "Price": 1.12909,
+     "Volume": 1500000
+    }, {
+     "Type": "Ask",
+     "Price": 1.1291,
+     "Volume": 1000000
+    }]
+  }
+}
+              </code></pre>
+            </p>
+          </div>          
+      </div>
+      <div id="footer">
+        <div id="footer-copyright">
+          <p>&copy; 2015, Soft-FX</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

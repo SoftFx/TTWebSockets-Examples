@@ -1,0 +1,1897 @@
+<!doctype html>
+<html>
+  <head>
+    <title>Node Test</title>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/core-min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/enc-base64-min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/hmac-sha256.js" type='text/javascript'></script>
+    <meta charset="utf-8">
+  </head>
+  <script>
+
+window.onload = Initialize;
+
+function Initialize() {
+  if (!("WebSocket" in window)) {  
+    alert("Sorry, no WebSockets!");
+    return;
+  }
+
+  document.getElementById("webSocketApiConnect").disabled = false;
+
+  var connectButton = document.getElementById("webSocketApiConnect");
+  connectButton.onclick = function() { IsConnected() ? Disconnect() : Connect(); };
+  var clearButton = document.getElementById("console-clear");
+  clearButton.onclick = function() { ClearConsole(); };
+}
+
+function CreateGuid() {
+  // http://www.ietf.org/rfc/rfc4122.txt
+  var s = [];
+  var hexDigits = "0123456789abcdef";
+  for (var i = 0; i < 36; i++) {
+    s[i] = hexDigits.substr(Math.floor(Math.random() * 0x10), 1);
+  }
+  // bits 12-15 of the time_hi_and_version field to 0010
+  s[14] = "4"; 
+  // bits 6-7 of the clock_seq_hi_and_reserved to 01
+  s[19] = hexDigits.substr((s[19] & 0x3) | 0x8, 1);  
+  s[8] = s[13] = s[18] = s[23] = "-";
+  return s.join("");
+}
+
+function GetTimestamp() {
+  var timestamp = new Date();
+  day = timestamp.getUTCDate();
+  month = timestamp.getUTCMonth();
+  month = month + 1;
+  if ((String(day)).length == 1)
+    day = '0' + day;
+  if ((String(month)).length == 1)
+    month = '0' + month;
+  hours = timestamp.getUTCHours();
+  if ((String(hours)).length == 1)
+    hours = '0' + hours;
+  minutes = timestamp.getUTCMinutes();
+  if ((String(minutes)).length == 1)
+    minutes = '0' + minutes;
+  seconds = timestamp.getUTCSeconds();
+  if ((String(seconds)).length == 1)
+    seconds = '0' + seconds;
+  milliseconds = timestamp.getUTCSeconds();
+  if ((String(milliseconds)).length == 1)
+    milliseconds = '00' + milliseconds;
+  else if ((String(milliseconds)).length == 2)
+    milliseconds = '0' + milliseconds;
+  return timestamp.getUTCFullYear() + '.' + month + '.' + day + ' ' + hours + ':' + minutes + ':' + seconds + '.' + milliseconds;
+}
+
+function WriteConsole(value) {
+  var console = document.getElementById("console-text");
+  console.value += GetTimestamp() + ' ' + value + '\n';
+  console.scrollTop = console.scrollHeight;
+}
+
+function ClearConsole() {
+  var console = document.getElementById("console-text");
+  console.value = "";
+  console.scrollTop = console.scrollHeight;
+}
+
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+
+var logon = false;
+var socket = null;
+
+function IsConnected() {
+  return socket != null;
+}
+
+function IsLogon() {
+  return logon;
+}
+
+function Connect() {
+  try {  
+    var address = document.getElementById("webSocketApiAddress").value;
+    var id = document.getElementById("webSocketApiId").value;
+    var key = document.getElementById("webSocketApiKey").value;
+    var secret = document.getElementById("webSocketApiSecret").value;
+    var timestamp = Date.now();
+    var signature = CreateSignature(timestamp, id, key, secret);
+
+    socket = new WebSocket(address);  
+    WriteConsole('Socket state: ' + socket.readyState); 
+    socket.onopen = function() {
+      document.getElementById("webSocketApiConnect").value = "Disconnect";
+      WriteConsole('Socket state: ' + socket.readyState + ' (open)'); 
+      var request = {
+        Id: CreateGuid(),
+        Request: "Login",
+        Params: {
+          AuthType: "HMAC",
+          WebApiId: id,
+          WebApiKey: key,
+          Timestamp: timestamp,
+          Signature: signature
+        }
+      };
+      Send(request);
+    }  
+    socket.onmessage = function(msg) { 
+      if (!IsLogon())
+        Logon();
+      Recieve(msg.data) 
+    }  
+    socket.onclose = function() {  
+      if (IsLogon())
+        Logout();
+      document.getElementById("webSocketApiConnect").value = "Connect";
+      WriteConsole('Socket state: ' + socket.readyState + ' (closed)');  
+      socket = null;
+    }           
+  } catch(exception) {  
+    WriteConsole('Error: ' + exception.text);
+  }  
+}
+
+function Disconnect() {
+  socket.close();
+}
+
+function Logon() {
+  logon = true;
+  EnableButtons(true);
+}
+
+function Logout() {
+  logon = false;
+  EnableButtons(false);
+}
+
+function EnableButtons(enabled) {
+  document.getElementById("example-disconnect-send").disabled = !enabled;
+  document.getElementById("example-sessioninfo-send").disabled = !enabled;
+  document.getElementById("example-accountinfo-send").disabled = !enabled;
+  document.getElementById("example-asset-all-send").disabled = !enabled;
+  document.getElementById("example-asset-by-currency-send").disabled = !enabled;
+  document.getElementById("example-position-all-send").disabled = !enabled;
+  document.getElementById("example-position-by-id-send").disabled = !enabled;
+  document.getElementById("example-position-by-symbol-send").disabled = !enabled;
+  document.getElementById("example-trade-all-send").disabled = !enabled;
+  document.getElementById("example-trade-by-id-send").disabled = !enabled;
+  document.getElementById("example-trade-create-market-send").disabled = !enabled;
+  document.getElementById("example-trade-create-limit-send").disabled = !enabled;
+  document.getElementById("example-trade-create-stop-send").disabled = !enabled;
+  document.getElementById("example-trade-create-ioc-send").disabled = !enabled;
+  document.getElementById("example-trade-modify-market-send").disabled = !enabled;
+  document.getElementById("example-trade-modify-pending-send").disabled = !enabled;
+  document.getElementById("example-trade-cancel-pending-send").disabled = !enabled;
+  document.getElementById("example-trade-close-market-full-send").disabled = !enabled;
+  document.getElementById("example-trade-close-market-partial-send").disabled = !enabled;
+  document.getElementById("example-trade-closeby-market-send").disabled = !enabled;
+  document.getElementById("example-trade-history-first-send").disabled = !enabled;
+  document.getElementById("example-trade-history-next-send").disabled = !enabled;
+}
+
+function Send(request) {
+  var jsonrequest = JSON.stringify(request);
+  socket.send(jsonrequest);
+  WriteConsole('Sent: ' + jsonrequest);  
+}
+
+function Recieve(response) {
+  WriteConsole('Received: ' + response);  
+}
+
+function ExampleRequest(id) {
+  var jsonrequest = document.getElementById(id).value;
+  var request = JSON.parse(jsonrequest);
+  Send(request);
+}
+
+  </script>
+  <style>
+    html {
+      height: 100%;
+    }
+    body {
+      margin: 0; 
+      padding: 0; 
+      height: 100%;
+    }
+    .anchor { 
+    }
+    .code { 
+      background: #F8F8FF; 
+      border: black dashed 1px; 
+      padding: 6px
+    }
+    #wrapper {
+      width: 100%;
+      min-width: 1250px;
+      min-height: 100%;
+      margin: auto;
+      position: relative;
+    }
+    * html #wrap {
+      height: 100%
+    }
+    #inner-wrap {
+      padding-bottom: 85px;
+    }
+    #inner-wrap:after {
+      content: " ";
+      display: block;
+      clear: both;
+    }
+    * html #inner-wrap {
+      height: 1px;
+    }
+    #header {
+      background: #0F6AB4;
+      border-radius: 0px 0px 10px 10px;
+      position: fixed; 
+      top: 0;
+      height: 80px !important;
+      width: 100%;
+      min-width: 1250px;
+      margin: 0px 20px 25px 20px;
+    }
+    #header-title {
+      float: left;
+      color: white;
+      font-size: large;
+      padding: 25px 20px 0px 20px;
+    }
+    #login-form {
+      margin: 25px 40px 0px 20px;
+      float: right;
+    }
+    #webSocketApiAddress {
+      width: 200px;
+    }
+    #webSocketApiId {
+      width: 260px;
+    }
+    #webSocketApiKey {
+      width: 150px;
+    }
+    #webSocketApiSecret {
+      width: 200px;
+    }
+    #webSocketApiConnect {
+      width: 100px;
+    }
+    #content {
+    }
+    #console-wrapper {
+      float: right;
+      width: 450px;
+    }
+    #console {
+      background-color: #eee;
+      position: fixed;
+      right: 20px;
+      top: 100px;
+      width: 450px;
+      height: 550px;
+      z-index: 100;
+      padding: 5px 5px 5px 5px;
+    }
+    #console-header {
+      padding: 5px 5px 5px 5px;
+    }
+    #console-clear {
+      float: right;
+    }
+    #console-body {
+      padding: 5px 10px 5px 5px;
+    }
+    #console-text {
+      resize: none;
+      width: 100%;
+    }
+    #documentation {
+      margin-top: 100px;
+      margin-left: 30px;
+      margin-right: 500px;
+    }
+    #footer {
+      background: #0F6AB4;
+      position: absolute;
+      width: 100%;
+      left: 0px;
+      bottom: 0px;
+      margin: 25px 0px 0px 0px;
+    }
+    #footer-copyright {
+      color: white;
+      margin: 0px 20px 0px 20px;
+    }
+  </style>
+  <body>
+    <div id="wrapper">
+      <div id="header">
+        <div id="header-title">Trade WebSockets</div>
+        <form id="login-form">
+          <input placeholder="wss://ttdemowebapi.soft-fx.com:2087" id="webSocketApiAddress" name="webSocketApiAddress" type="text" value=""/>
+          <input placeholder="Web API Id" id="webSocketApiId" name="webSocketApiId" type="text" value=""/>
+          <input placeholder="Web API Key" id="webSocketApiKey" name="webSocketApiKey" type="text" value=""/>
+          <input placeholder="Web API Secret" id="webSocketApiSecret" name="webSocketApiSecret" type="text" value=""/>
+          <input id="webSocketApiConnect" type="button" value="Connect" disabled="true"/>
+        </form>
+      </div>
+      <div id="inner-wrap">
+        <div id="content">
+          <div id="console">
+            <div id="console-header">
+              <form id="console-form">
+                <b id="console-form-title">WebSocket console</b>
+                <input id="console-clear" type="button" value="Clear"/>
+              </form>
+            </div>                    
+            <div id="console-body">
+              <textarea id="console-text" rows="33" readonly="true"></textarea>
+            </div>                    
+          </div>          
+          <div id="console-wrapper">
+          </div>          
+        </div>
+          <div id="documentation">
+            <h1>TickTrader Trade WebSocket API</h1>
+            <p>
+              TickTrader Trade WebSocket API is used to connect to the TickTrader Server using 
+              <a href="https://en.wikipedia.org/wiki/WebSocket" target="_blank">secure web sockets technology (wss://)</a> 
+              to get account information, assets, positions & trades and perform trade operations.
+            </p>
+            <h2>Contents</h2>
+              <ul>
+                <li>
+                  <a href="#connect">Connect and login</a>
+                  <ul>
+                    <li><a href="#login-request">Login request</a></li>
+                    <li><a href="#login-response">Login response</a></li>
+                    <li><a href="#login-error">Login error</a></li>
+                    <li><a href="#authentication">Authentication</a></li>
+                    <li><a href="#example-connect">Example: Connect and login</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#disconnect">Disconnect</a>
+                  <ul>
+                    <li><a href="#example-disconnect">Example: Disconnect</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#session-information">Session information</a>
+                  <ul>
+                    <li><a href="#session-information-request">Session information request</a></li>
+                    <li><a href="#session-information-response">Session information response</a></li>
+                    <li><a href="#session-information-error">Session information error</a></li>
+                    <li><a href="#example-sessioninfo">Example: Session information</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#account-information">Account information</a>
+                  <ul>
+                    <li><a href="#account-information-request">Account information request</a></li>
+                    <li><a href="#account-information-response">Account information response</a></li>
+                    <li><a href="#account-information-error">Account information error</a></li>
+                    <li><a href="#example-accountinfo">Example: Account information</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#asset-information">Assets information (Cash accounts only!)</a>
+                  <ul>
+                    <li><a href="#asset-information-request">Assets information request</a></li>
+                    <li><a href="#asset-information-response">Assets information response</a></li>
+                    <li><a href="#asset-information-error">Assets information error</a></li>
+                    <li><a href="#example-asset-all">Example: Get all assets information</a></li>
+                    <li><a href="#example-asset-by-currency">Example: Get asset by currency</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#position-information">Positions information (Net accounts only!)</a>
+                  <ul>
+                    <li><a href="#position-information-request">Positions information request</a></li>
+                    <li><a href="#position-information-response">Positions information response</a></li>
+                    <li><a href="#position-information-error">Positions information error</a></li>
+                    <li><a href="#example-position-all">Example: Get all positions information</a></li>
+                    <li><a href="#example-position-by-id">Example: Get position by Id</a></li>
+                    <li><a href="#example-position-by-symbol">Example: Get position by symbol</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#trade-information">Trades information</a>
+                  <ul>
+                    <li><a href="#trade-information-request">Trades information request</a></li>
+                    <li><a href="#trade-information-response">Trades information response</a></li>
+                    <li><a href="#trade-information-error">Trades information error</a></li>
+                    <li><a href="#example-trade-all">Example: Get all trades information</a></li>
+                    <li><a href="#example-trade-by-id">Example: Get trade by Id</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#trade-create">Trade create</a>
+                  <ul>
+                    <li><a href="#trade-create-request">Trade create request</a></li>
+                    <li><a href="#trade-create-response">Trade create response</a></li>
+                    <li><a href="#trade-create-error">Trade create error</a></li>
+                    <li><a href="#example-trade-create-market">Example: Create market trade</a></li>
+                    <li><a href="#example-trade-create-limit">Example: Create limit trade</a></li>
+                    <li><a href="#example-trade-create-stop">Example: Create stop trade</a></li>
+                    <li><a href="#example-trade-create-ioc">Example: Create imediate-or-cancel limit trade (IOC)</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#trade-modify">Trade modify</a>
+                  <ul>
+                    <li><a href="#trade-modify-request">Trade modify request</a></li>
+                    <li><a href="#trade-modify-response">Trade modify response</a></li>
+                    <li><a href="#trade-modify-error">Trade modify error</a></li>
+                    <li><a href="#example-trade-modify-market">Example: Modify market trade</a></li>
+                    <li><a href="#example-trade-modify-pending">Example: Modify pending trade</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#trade-delete">Trade cancel/close</a>
+                  <ul>
+                    <li><a href="#trade-delete-request">Trade cancel/close request</a></li>
+                    <li><a href="#trade-delete-response">Trade cancel/close response</a></li>
+                    <li><a href="#trade-delete-error">Trade cancel/close error</a></li>
+                    <li><a href="#example-trade-cancel-pending">Example: Cancel pending trade</a></li>
+                    <li><a href="#example-trade-close-market-full">Example: Close market trade (full)</a></li>
+                    <li><a href="#example-trade-close-market-partial">Example: Close market trade (partial)</a></li>
+                    <li><a href="#example-trade-closeby-market">Example: Close market trade by another market trade</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#trade-history">Trade history</a>
+                  <ul>
+                    <li><a href="#trade-history-request">Trade history request</a></li>
+                    <li><a href="#trade-history-response">Trade history response</a></li>
+                    <li><a href="#trade-history-error">Trade history error</a></li>
+                    <li><a href="#example-trade-history-first">Example: Trade history first request</a></li>
+                    <li><a href="#example-trade-history-next">Example: Trade history next request</a></li>
+                  </ul>
+                </li>
+                <li>
+                  <a href="#notifications">Notifications</a>
+                  <ul>
+                    <li><a href="#notification-sessioninfo">Notification: Session information</a></li>
+                    <li><a href="#notification-accountinfo">Notification: Account information</a></li>
+                    <li><a href="#notification-execution-reports">Notification: Execution reports</a></li>
+                  </ul>
+                </li>
+              </ul>
+            <h2><a class="anchor" name="connect">Connect and login</a></h2>
+            <p>
+              Connection operation is perfromed in two phases. First you need to create and instance of WebSocket object and
+              provide an address to connect. Then you should perfrom HMAC authentication in 'onopen' event handler.
+            </p>
+            <h3><a class="anchor" name="login-request">Login request</a></h3>
+            <p>
+              Login request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Login",
+  "Params": {
+    "AuthType": "HMAC",
+    "WebApiId":  &lt;Web API Id&gt;,
+    "WebApiKey": &lt;Web API Key&gt;,
+    "Timestamp": &lt;timestamp (e.g. Date.now())&gt;,
+    "Signature": &lt;signature&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="login-response">Login response</a></h3>
+            <p>
+              Success Login response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Login",
+  "Result": "ok"
+}
+              </code></pre>
+              Just after login response you will recieve <a href="#notification-sessioninfo">session information notification</a> 
+              and <a href="#notification-accountinfo">account information notification</a>!
+            </p>
+            <h3><a class="anchor" name="login-error">Login error</a></h3>
+            <p>
+              Error Login response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="authentication">Authentication</a></h3>
+            <p>
+              Signature should be calculated from "&lt;timestamp&gt;+&lt;id&gt;+&lt;key&gt;" with the "&lt;secret&gt;" 
+              using HMAC/SHA256 with BASE64 encoding. For example you can use <a href="https://code.google.com/p/crypto-js/" target="_blank">Crypto-JS API</a>
+              to calculate the required signature:
+              <pre class="code"><code>
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-connect">Example: Connect and login</a></h3>
+            <p>
+              Below you will find a complete JavaScript code fragment which connectes to TickTrader Server using WebSockets technology:
+              <pre class="code"><code>
+&lt;script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/core-min.js" type='text/javascript'>&lt;/script&gt;
+&lt;script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/enc-base64-min.js" type='text/javascript'>&lt;/script&gt;
+&lt;script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/hmac-sha256.js" type='text/javascript'>&lt;/script&gt;
+
+&lt;script&gt;
+
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+
+var socket = null;
+
+function Connect(address, id, key, secret) {
+  try {  
+    var timestamp = Date.now();
+    var signature = CreateSignature(timestamp, id, key, secret);
+
+    socket = new WebSocket(address);  
+    console.log('Socket state: ' + socket.readyState); 
+    socket.onopen = function() {
+      console.log('Socket state: ' + socket.readyState + ' (open)'); 
+      var request = {
+        Id: "8AF57382-DE83-49DC-9B4E-CF9FF4A4A798",
+        Request: "Login",
+        Params: {
+          AuthType: "HMAC",
+          WebApiId: id,
+          WebApiKey: key,
+          Timestamp: timestamp,
+          Signature: signature
+        }
+      };
+      var jsonrequest = JSON.stringify(request);
+      socket.send(jsonrequest);
+    }  
+    socket.onmessage = function(msg) { 
+      console.log(msg.data);
+    }  
+    socket.onclose = function() {  
+      console.log('Socket state: ' + socket.readyState + ' (closed)');  
+      socket = null;
+    }           
+  } catch(exception) {  
+    console.log('Error: ' + exception.text);
+  }  
+}
+
+&lt;/script&gt;
+              </code></pre>
+            </p>
+            <h2><a class="anchor" name="disconnect">Disconnect</a></h2>
+            <p>
+              Disconnection from WebSockets interface is performed simply by closing web socket object:
+              <pre class="code"><code>
+function Disconnect() {
+  socket.close();
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-disconnect">Example: Disconnect</a></h3>
+            <form id="example-disconnect-form">
+              <input id="example-disconnect-send" type="button" value="Disconnect" disabled="true" onclick="Disconnect()"/>
+            </form>
+            <h2><a class="anchor" name="session-information">Session information</a></h2>
+            <p>
+              Feed session contains information about TickTrader Server configuration and working time.
+            </p>
+            <h3><a class="anchor" name="session-information-request">Session information request</a></h3>
+            <p>
+              Session information request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "SessionInfo"
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="session-information-response">Session information response</a></h3>
+            <p>
+              Success Session information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "SessionInfo",
+  "Result": {
+    "PlatformName": "TickTrader Demo Server",
+    "PlatformCompany": "Soft-FX",
+    "PlatformAddress": "ttdemo.soft-fx.com",
+    "PlatformTimezoneOffset": 3,
+    "SessionId": "e36c076b-4e38-472d-b271-017a4152f09e",
+    "SessionStatus": "Opened",
+    "SessionStartTime": 1443722400000,
+    "SessionEndTime": 253402297200000,
+    "SessionOpenTime": 1443722400000,
+    "SessionCloseTime": 253402297200000
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="session-information-error">Session information error</a></h3>
+            <p>
+              Error Session information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-sessioninfo">Example: Session information</a></h3>
+            <form id="example-sessioninfo-form">
+              <textarea id="example-sessioninfo-request" rows="5" cols="80">
+{
+  "Id": "A6B103E2-E3B4-4E27-A2EE-1BABD75206AA",
+  "Request": "SessionInfo"
+}
+              </textarea><br/>
+              <input id="example-sessioninfo-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-sessioninfo-request')"/>
+            </form>
+            <h2><a class="anchor" name="account-information">Account information</a></h2>
+            <p>
+              Access to the account information in Tick Trader Server.
+            </p>
+            <h3><a class="anchor" name="account-information-request">Account information request</a></h3>
+            <p>
+              Account information request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Account"
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="account-information-response">Account information response</a></h3>
+            <p>
+              Success Account information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Account",
+  "Result": {
+    "Id": 5,
+    "Group": "demoforex_gross",
+    "AccountingType": "Gross",
+    "Name": "DemoForexGross",
+    "Comment": "Test account",
+    "Registered": 1404114533000,
+    "IsBlocked": false,
+    "IsReadonly": false,
+    "IsValid": true,
+    "IsWebApiEnabled": true,
+    "Leverage": 100,
+    "Balance": 999999741.1900000000,
+    "BalanceCurrency": "USD",
+    "Equity": 999999741.1900000000,
+    "Margin": 0,
+    "MarginLevel": 0,
+    "MarginCallLevel": 50,
+    "StopOutLevel": 30
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="account-information-error">Account information error</a></h3>
+            <p>
+              Error Account information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-accountinfo">Example: Account information</a></h3>
+            <form id="example-accountinfo-form">
+              <textarea id="example-accountinfo-request" rows="5" cols="80">
+{
+  "Id": "E5B68CB6-3844-4DFB-9E33-DC00A73E3376",
+  "Request": "Account"
+}
+              </textarea><br/>
+              <input id="example-accountinfo-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-accountinfo-request')"/>
+            </form>
+            <h2><a class="anchor" name="asset-information">Assets information (Cash accounts only!)</a></h2>
+            <p>
+              Access to the cash account assets information in Tick Trader Server. <b>Works only for cash accounts!</b>
+            </p>
+            <h3><a class="anchor" name="asset-information-request">Assets information request</a></h3>
+            <p>
+              To get all avaliable cash account assets request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Assets"
+}
+              </code></pre>
+            </p>
+            <p>
+              To get cash account asset information by currency name request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Assets",
+  "Params": {
+    "Currency": &lt;currency&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="asset-information-response">Assets information response</a></h3>
+            <p>
+              Cash account assets information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Assets",
+  "Result": {
+    "Assets": [{
+      "Currency": "USD",
+       "Amount": 873244.4
+    }, {
+       "Currency": "EUR",
+       "Amount": 89995.0
+    }, {
+       "Currency": "AUD",
+       "Amount": 14119.7
+    }, {
+       "Currency": "GBP",
+       "Amount": 9999.5
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="asset-information-error">Assets information error</a></h3>
+            <p>
+              Error cash account assets response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-asset-all">Example: Get all assets information</a></h3>
+            <form id="example-asset-all-form">
+              <textarea id="example-asset-all-request" rows="5" cols="80">
+{
+  "Id": "5587DA22-D158-4C51-8B6B-EBF18AAB5824",
+  "Request": "Assets"
+}
+              </textarea><br/>
+              <input id="example-asset-all-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-asset-all-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-asset-by-currency">Example: Get asset by currency name</a></h3>
+            <form id="example-asset-by-currency-form">
+              <textarea id="example-asset-by-currency-request" rows="8" cols="80">
+{
+  "Id": "5B6AF7B1-8385-4F86-B342-5BE31C15FC7E",
+  "Request": "Assets",
+  "Params": {
+    "Currency": "USD"
+  }
+}
+              </textarea><br/>
+              <input id="example-asset-by-currency-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-asset-by-currency-request')"/>
+            </form>
+            <h2><a class="anchor" name="position-information">Positions information (Net accounts only!)</a></h2>
+            <p>
+              Access to the net account positions information in Tick Trader Server. <b>Works only for net accounts!</b>
+            </p>
+            <h3><a class="anchor" name="position-information-request">Positions information request</a></h3>
+            <p>
+              To get all avaliable net account positions request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Positions"
+}
+              </code></pre>
+            </p>
+            <p>
+              To get net account position information by Id request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Positions",
+  "Params": {
+    "Id": &lt;id&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To get net account position information by symbol name request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Positions",
+  "Params": {
+    "Symbol": &lt;symbol&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="position-information-response">Positions information response</a></h3>
+            <p>
+              Net account positions information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Positions",
+  "Result": {
+    "Positions": [{
+      "Id": 555003,
+      "Symbol": "EUR/USD",
+      "LongAmount": 2970000,
+      "LongPrice": 1.08,
+      "ShortAmount": 0,
+      "ShortPrice": 0,
+      "Commission": -40.37,
+      "AgentCommission": 0,
+      "Swap": 4065.10,
+      "Modified": 1444003200004
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="position-information-error">Positions information error</a></h3>
+            <p>
+              Error net account positions response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-position-all">Example: Get all positions information</a></h3>
+            <form id="example-position-all-form">
+              <textarea id="example-position-all-request" rows="5" cols="80">
+{
+  "Id": "84FA999A-685D-4BDF-A6B8-C5E1C900DDE7",
+  "Request": "Positions"
+}
+              </textarea><br/>
+              <input id="example-position-all-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-position-all-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-position-by-id">Example: Get position by Id</a></h3>
+            <form id="example-position-by-id-form">
+              <textarea id="example-position-by-id-request" rows="8" cols="80">
+{
+  "Id": "FF666411-740D-40D8-A5D7-3BBFCFE45F4B",
+  "Request": "Positions",
+  "Params": {
+    "Id": 12345678
+  }
+}
+              </textarea><br/>
+              <input id="example-position-by-id-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-position-by-id-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-position-by-symbol">Example: Get position by symbol name</a></h3>
+            <form id="example-position-by-symbol-form">
+              <textarea id="example-position-by-symbol-request" rows="8" cols="80">
+{
+  "Id": "D55E08B5-882B-4EE1-B22A-6FC936B2EF39",
+  "Request": "Positions",
+  "Params": {
+    "Symbol": "EUR/USD"
+  }
+}
+              </textarea><br/>
+              <input id="example-position-by-symbol-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-position-by-symbol-request')"/>
+            </form>
+            <h2><a class="anchor" name="trade-information">Trades information</a></h2>
+            <p>
+              Access to the account trades information in Tick Trader Server.
+            </p>
+            <h3><a class="anchor" name="trade-information-request">Trades information request</a></h3>
+            <p>
+              To get all avaliable account trades request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Trades"
+}
+              </code></pre>
+            </p>
+            <p>
+              To get account trade information by Id request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "Trades",
+  "Params": {
+    "Id": &lt;id&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-information-response">Trades information response</a></h3>
+            <p>
+              Account trades information response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Trades",
+  "Result": {
+    "Trades": [{
+      "Id": 769002,
+      "ClientId": "bf9e37b3-b2f6-42ca-9946-86309d4ed746",
+      "AccountId": 5,
+      "Type": "Position",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "EURUSD",
+      "Price": 1.11992,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Commission": -5.60,
+      "AgentCommission": 0,
+      "Created": 1444060398377,
+      "Modified": 1444060398384,
+      "Filled": 1444060398384,
+      "PositionCreated": 1444060398384
+    }, {
+      "Id": 769004,
+      "ClientId": "1da440da-2854-40ab-8246-167436fffb34",
+      "AccountId": 5,
+      "Type": "Limit",
+      "InitialType": "Limit",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "AUDCAD",
+      "Price": 0.82679,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Created": 1444060421926,
+      "Modified": 1444060421934
+    }, {
+      "Id": 769008,
+      "ClientId": "e22ccc93-88e1-4006-a0a7-3200b6fbccab",
+      "AccountId": 5,
+      "Type": "Stop",
+      "InitialType": "Stop",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "CADCHF",
+      "Price": 0.84515,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Created": 1444061178536,
+      "Modified": 1444061178544
+    }]
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-information-error">Trades information error</a></h3>
+            <p>
+              Error account trades response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-trade-all">Example: Get all trades information</a></h3>
+            <form id="example-trade-all-form">
+              <textarea id="example-trade-all-request" rows="5" cols="80">
+{
+  "Id": "DE5AE437-6365-4AD3-AC87-3E78D8833D02",
+  "Request": "Trades"
+}
+              </textarea><br/>
+              <input id="example-trade-all-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-all-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-by-id">Example: Get trade by Id</a></h3>
+            <form id="example-trade-by-id-form">
+              <textarea id="example-trade-by-id-request" rows="8" cols="80">
+{
+  "Id": "F6A1618D-E044-4225-9C96-7E9D64E993C5",
+  "Request": "Trades",
+  "Params": {
+    "Id": 12345678
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-by-id-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-by-id-request')"/>
+            </form>
+            <h2><a class="anchor" name="trade-create">Trade create</a></h2>
+            <p>
+              Create new trades in Tick Trader Server.
+            </p>
+            <h3><a class="anchor" name="trade-create-request">Trade create request</a></h3>
+            <p>
+              To create new market trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Market",
+    "Side": "Buy" | "Sell",
+    "Symbol": &lt;symbol&gt;,
+    "Amount": &lt;amount&gt;,
+    "StopLoss": &lt;stop loss (optional)&gt;,
+    "TakeProfit": &lt;take profit (optional)&gt;,
+    "Comment": &lt;comment (optional)&gt;,
+    "ClientId": &lt;client trade Id (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To create new limit trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Limit",
+    "Side": "Buy" | "Sell",
+    "Symbol": &lt;symbol&gt;,
+    "Amount": &lt;amount&gt;,
+    "Price": &lt;price&gt;,
+    "Expired": &lt;expiration timestamp (optional)&gt;,
+    "StopLoss": &lt;stop loss (optional)&gt;,
+    "TakeProfit": &lt;take profit (optional)&gt;,
+    "Comment": &lt;comment (optional)&gt;,
+    "ClientId": &lt;client trade Id (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To create new stop trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Stop",
+    "Side": "Buy" | "Sell",
+    "Symbol": &lt;symbol&gt;,
+    "Amount": &lt;amount&gt;,
+    "Price": &lt;price&gt;,
+    "Expired": &lt;expiration timestamp (optional)&gt;,
+    "StopLoss": &lt;stop loss (optional)&gt;,
+    "TakeProfit": &lt;take profit (optional)&gt;,
+    "Comment": &lt;comment (optional)&gt;,
+    "ClientId": &lt;client trade Id (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To create new imediate-or-cancel limit trade (IOC) request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Limit",
+    "ImmediateOrCancel": true,
+    "Side": "Buy" | "Sell",
+    "Symbol": &lt;symbol&gt;,
+    "Amount": &lt;amount&gt;,
+    "Price": &lt;price&gt;,
+    "StopLoss": &lt;stop loss (optional)&gt;,
+    "TakeProfit": &lt;take profit (optional)&gt;,
+    "Comment": &lt;comment (optional)&gt;,
+    "ClientId": &lt;client trade Id (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-create-response">Trade create response</a></h3>
+            <p>
+              Before trade create response response you will recieve a set of <a href="#notification-execution-reports">execution reports notifications</a>!
+
+              Trade create response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "TradeCreate",
+  "Result": {
+    "Trade": {
+      "Id": 769009,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Market",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Filled",
+      "Symbol": "EURUSD",
+      "Price": 1.12142,
+      "Amount": 0,
+      "InitialAmount": 100000,
+      "Created": 1444139200012,
+      "Modified": 1444139200020,
+      "Filled": 1444139200020,
+      "Comment": "WebSocket API market"
+    }
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-create-error">Trade create error</a></h3>
+            <p>
+              Error trade create response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-trade-create-market">Example: Create market trade</a></h3>
+            <form id="example-trade-create-market-form">
+              <textarea id="example-trade-create-market-request" rows="13" cols="80">
+{
+  "Id": "C33F5B8C-046A-4AC2-A9F9-77A8A3967FBF",
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Market",
+    "Side": "Buy",
+    "Symbol": "EURUSD",
+    "Amount": 100000,
+    "Comment": "WebSocket API market",
+    "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-create-market-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-create-market-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-create-limit">Example: Create limit trade</a></h3>
+            <form id="example-trade-create-limit-form">
+              <textarea id="example-trade-create-limit-request" rows="15" cols="80">
+{
+  "Id": "F5E5AD8D-5D0D-42B4-B028-5B8002017AD6",
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Limit",
+    "Side": "Buy",
+    "Symbol": "EURUSD",
+    "Amount": 100000,
+    "Price": 1.0,
+    "Comment": "WebSocket API limit",
+    "ClientId": "client-limit-3AE8716F-0EA9-43ED-A638-21AD054056CB"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-create-limit-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-create-limit-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-create-stop">Example: Create stop trade</a></h3>
+            <form id="example-trade-create-stop-form">
+              <textarea id="example-trade-create-stop-request" rows="15" cols="80">
+{
+  "Id": "9C823035-842F-4300-8326-1113EE464876",
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Stop",
+    "Side": "Buy",
+    "Symbol": "EURUSD",
+    "Amount": 100000,
+    "Price": 1.5,
+    "Comment": "WebSocket API stop",
+    "ClientId": "client-stop-3AE8716F-0EA9-43ED-A638-21AD054056CB"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-create-stop-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-create-stop-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-create-ioc">Example: Create imediate-or-cancel limit trade (IOC)</a></h3>
+            <form id="example-trade-create-ioc-form">
+              <textarea id="example-trade-create-ioc-request" rows="15" cols="80">
+{
+  "Id": "142D758F-8389-4E49-9144-902C6F253ABA",
+  "Request": "TradeCreate",
+  "Params": {
+    "Type": "Limit",
+    "ImmediateOrCancel": true,
+    "Side": "Buy",
+    "Symbol": "EURUSD",
+    "Amount": 100000,
+    "Price": 1.0,
+    "Comment": "WebSocket API ioc",
+    "ClientId": "client-ioc-3AE8716F-0EA9-43ED-A638-21AD054056CB"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-create-ioc-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-create-ioc-request')"/>
+            </form>
+            <h2><a class="anchor" name="trade-modify">Trade modify</a></h2>
+            <p>
+              Modify trades in Tick Trader Server.
+            </p>
+            <h3><a class="anchor" name="trade-modify-request">Trade modify request</a></h3>
+            <p>
+              To modify market trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeModify",
+  "Params": {
+    "Id": &lt;trade Id&gt;,
+    "StopLoss": &lt;stop loss (optional)&gt;,
+    "TakeProfit": &lt;take profit (optional)&gt;,
+    "Comment": &lt;comment (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To modify pending trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeModify",
+  "Params": {
+    "Id": &lt;trade Id&gt;,
+    "Price": &lt;pending trade price (optional)&gt;,
+    "Expired": &lt;expiration timestamp (optional)&gt;,
+    "StopLoss": &lt;stop loss (optional)&gt;,
+    "TakeProfit": &lt;take profit (optional)&gt;,
+    "Comment": &lt;comment (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-modify-response">Trade modify response</a></h3>
+            <p>
+              Before trade create response response you will recieve a set of <a href="#notification-execution-reports">execution reports notifications</a>!
+
+              Trade modify response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "TradeModify",
+  "Result": {
+    "Trade": {
+      "Id": 769009,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Market",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Filled",
+      "Symbol": "EURUSD",
+      "Price": 1.12142,
+      "Amount": 0,
+      "InitialAmount": 100000,
+      "Created": 1444139200012,
+      "Modified": 1444139200020,
+      "Filled": 1444139200020,
+      "Comment": "Modified trade"
+    }
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-modify-error">Trade modify error</a></h3>
+            <p>
+              Error trade modify response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-trade-modify-market">Example: Modify market trade</a></h3>
+            <form id="example-trade-modify-market-form">
+              <textarea id="example-trade-modify-market-request" rows="11" cols="80">
+{
+  "Id": "7B0E9179-37F3-4423-9234-A60D2D164258",
+  "Request": "TradeModify",
+  "Params": {
+    "Id": 12345678,
+    "StopLoss": 1.0,
+    "TakeProfit": 1.5,
+    "Comment": "Modified trade"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-modify-market-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-modify-market-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-modify-pending">Example: Modify pending trade</a></h3>
+            <form id="example-trade-modify-pending-form">
+              <textarea id="example-trade-modify-pending-request" rows="13" cols="80">
+{
+  "Id": "3B7C0499-1A15-46B9-84DE-9D9D801F3341",
+  "Request": "TradeModify",
+  "Params": {
+    "Id": 12345678,
+    "Price": 1.3,
+    "Expired": 1444239200012,
+    "StopLoss": 1.0,
+    "TakeProfit": 1.5,
+    "Comment": "Modified trade"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-modify-pending-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-modify-pending-request')"/>
+            </form>
+            <h2><a class="anchor" name="trade-delete">Trade cancel/close</a></h2>
+            <p>
+              Cancel/close trades in Tick Trader Server.
+            </p>
+            <h3><a class="anchor" name="trade-delete-request">Trade cancel/close request</a></h3>
+            <p>
+              To cancel pending trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "Cancel",
+    "Id": &lt;trade Id&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To close market trade (full) request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "Close",
+    "Id": &lt;trade Id&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To close market trade (partial) request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "Close",
+    "Id": &lt;trade Id&gt;,
+    "Amount": &lt;close amount&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To close market trade by another marker trade request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "CloseBy",
+    "Id": &lt;trade Id&gt;,
+    "ById": &lt;by trade Id&gt;,
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-delete-response">Trade cancel/close response</a></h3>
+            <p>
+              Before trade create response response you will recieve a set of <a href="#notification-execution-reports">execution reports notifications</a>!
+
+              Trade cancel/close response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "TradeDelete",
+  "Result": {
+    "Trade": {
+      "Id": 769023,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Position",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Filled",
+      "Symbol": "EURUSD",
+      "Price": 1.12521,
+      "Amount": 0,
+      "InitialAmount": 100000,
+      "Commission": -5.63,
+      "AgentCommission": 0,
+      "Created": 1444214766990,
+      "Modified": 1444214925697,
+      "Filled": 1444214766999,
+      "PositionCreated": 1444214766999,
+      "Comment": "Closed trade"
+    }
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-delete-error">Trade cancel/close error</a></h3>
+            <p>
+              Error trade cancel/close response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-trade-cancel-pending">Example: Cancel pending trade</a></h3>
+            <form id="example-trade-cancel-pending-form">
+              <textarea id="example-trade-cancel-pending-request" rows="9" cols="80">
+{
+  "Id": "38620399-59A1-4FAC-9859-64633593EC74",
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "Cancel",
+    "Id": 12345678
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-cancel-pending-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-cancel-pending-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-close-market-full">Example: Close market trade (full)</a></h3>
+            <form id="example-trade-close-market-full-form">
+              <textarea id="example-trade-close-market-full-request" rows="9" cols="80">
+{
+  "Id": "1626DA4B-C771-482A-BCD8-E7C2266637C8",
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "Close",
+    "Id": 12345678
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-close-market-full-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-close-market-full-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-close-market-partial">Example: Close market trade (partial)</a></h3>
+            <form id="example-trade-close-market-partial-form">
+              <textarea id="example-trade-close-market-partial-request" rows="10" cols="80">
+{
+  "Id": "F0EC143E-5F69-4ADE-9834-20BE793C3FFD",
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "Close",
+    "Id": 12345678,
+    "Amount": 10000
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-close-market-partial-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-close-market-partial-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-closeby-market">Example: Close market trade by another market trade</a></h3>
+            <form id="example-trade-closeby-market-form">
+              <textarea id="example-trade-closeby-market-request" rows="10" cols="80">
+{
+  "Id": "B25F252D-0793-42CD-B498-5C72D975B289",
+  "Request": "TradeDelete",
+  "Params": {
+    "Type": "CloseBy",
+    "Id": 12345678,
+    "ById": 87654321
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-closeby-market-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-closeby-market-request')"/>
+            </form>
+            <h2><a class="anchor" name="trade-history">Trade history</a></h2>
+            <p>
+              Get trade history from Tick Trader Server.
+            </p>
+            <h3><a class="anchor" name="trade-history-request">Trade history request</a></h3>
+            <p>
+              To get trade history with paging the first request should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeHistory",
+  "Params": {
+    "TimestampFrom": &lt;from timestamp (optional)&gt;,
+    "TimestampTo": &lt;to timestamp (optional)&gt;,
+    "RequestDirection": &lt;direction "Forward" or "Backward" (optional, default is "Forward")&gt;,
+    "RequestPageSize": &lt;page size (optional, default is 100)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <p>
+              To get trade history with paging all next requests should be a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;some unique Id&gt;,
+  "Request": "TradeHistory",
+  "Params": {
+    "TimestampFrom": &lt;from timestamp (optional)&gt;,
+    "TimestampTo": &lt;to timestamp (optional)&gt;,
+    "RequestDirection": &lt;direction "Forward" or "Backward" (optional, default is "Forward")&gt;,
+    "RequestPageSize": &lt;page size (optional, default is 100)&gt;,
+    "RequestLastId": &lt;last record Id in previous request (optional)&gt;
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-history-response">Trade history response</a></h3>
+            <p>
+              Trade history response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "TradeHistory",
+  "Result": {
+    "IsLastReport": false,
+    "Records": [{
+      "Id": "542b29688eeafa14e09e42b9",
+      "TransactionType": "Balance",
+      "TransactionReason": "DealerDecision",
+      "TransactionTimestamp": 1412114792915,
+      "TradeId": 62006,
+      "TradeCreated": 1412114792915,
+      "Balance": 0.0000000000,
+      "BalanceMovement": 0,
+      "BalanceCurrency": "USD"
+    }, {
+      "Id": "542b2ab88eeafa265c466f62",
+      "TransactionType": "PositionClosed",
+      "TransactionReason": "StopOut",
+      "TransactionTimestamp": 1412115114535,
+      "Symbol": "AUDCAD",
+      "TradeId": 62002,
+      "ParentTradeId": 62002,
+      "ClientTradeId": "ManagerOrder-6f521755-937f-4a38-8960-ebae978fc276",
+      "TradeSide": "Buy",
+      "TradeType": "Position",
+      "TradeCreated": 1412114750693,
+      "PositionId": 62002,
+      "PositionAmount": 0,
+      "PositionInitialAmount": 100000,
+      "PositionLastAmount": 100000,
+      "PositionOpenPrice": 0.97952,
+      "PositionOpened": 1412114751410,
+      "PositionClosePrice": 0.97933,
+      "PositionClosed": 1412115114535,
+      "Balance": -16.96,
+      "BalanceMovement": -16.96,
+      "BalanceCurrency": "USD",
+      "Commission": 0,
+      "AgentCommission": 0,
+      "Swap": 0,
+      "Comment": "Closed trade",
+      "MarginRateInitial": 0.87458
+    }
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="trade-history-error">Trade history error</a></h3>
+            <p>
+              Error trade history response from TickTrader Server is a valid JSON message with the following fields:
+              <pre class="code"><code>
+{
+  "Id": &lt;your unique Id&gt;,
+  "Response": "Error",
+  "Error": &lt;error description from TickTrader Server&gt;
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="example-trade-history-first">Example: Trade history first request</a></h3>
+            <form id="example-trade-history-first-form">
+              <textarea id="example-trade-history-first-request" rows="9" cols="80">
+{
+  "Id": "02CCEEE0-03B4-402B-8B76-B9A324991029",
+  "Request": "TradeHistory",
+  "Params": {
+    "RequestDirection": "Forward",
+    "RequestPageSize": 100
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-history-first-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-history-first-request')"/>
+            </form>
+            <h3><a class="anchor" name="example-trade-history-next">Example: Trade history next request</a></h3>
+            <form id="example-trade-history-next-form">
+              <textarea id="example-trade-history-next-request" rows="10" cols="80">
+{
+  "Id": "6E88A2FF-329E-44E3-B429-E65C6BD7E9E6",
+  "Request": "TradeHistory",
+  "Params": {
+    "RequestDirection": "Forward",
+    "RequestPageSize": 100,
+    "RequestLastId": "559142b7f8ae1b2b94f89a58"
+  }
+}
+              </textarea><br/>
+              <input id="example-trade-history-next-send" type="button" value="Send" disabled="true" onclick="ExampleRequest('example-trade-history-next-request')"/>
+            </form>
+            <h2><a class="anchor" name="notifications">Notifications</a></h2>
+            <h3><a class="anchor" name="notification-sessioninfo">Notification: Session information</a></h3>
+            <p>
+              When Trade session state is changed TickTrader Server will send corresponding notification. 
+              You will recieve this notification after successfull login as well!
+              <pre class="code"><code>
+{
+  "Response": "SessionInfo",
+  "Result": {
+    "PlatformName": "TickTrader Demo Server",
+    "PlatformCompany": "Soft-FX",
+    "PlatformAddress": "ttdemo.soft-fx.com",
+    "PlatformTimezoneOffset": 3,
+    "SessionId": "e36c076b-4e38-472d-b271-017a4152f09e",
+    "SessionStatus": "Opened",
+    "SessionStartTime": 1443787200000,
+    "SessionEndTime": 253402297200000,
+    "SessionOpenTime": 1443787200000,
+    "SessionCloseTime": 253402297200000
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="notification-accountinfo">Notification: Account information</a></h3>
+            <p>
+              When Account state is changed TickTrader Server will send corresponding notification. 
+              You will recieve this notification after successfull login as well!
+              <pre class="code"><code>
+{
+  "Response": "Account",
+  "Result": {
+    "Id": 5,
+    "Group": "demoforex_gross",
+    "AccountingType": "Gross",
+    "Name": "DemoForexGross",
+    "Comment": "Test account",
+    "Registered": 1404114533000,
+    "IsBlocked": false,
+    "IsReadonly": false,
+    "IsValid": true,
+    "IsWebApiEnabled": true,
+    "Leverage": 100,
+    "Balance": 999999741.1900000000,
+    "BalanceCurrency": "USD",
+    "Equity": 999999741.1900000000,
+    "Margin": 0,
+    "MarginLevel": 0,
+    "MarginCallLevel": 50,
+    "StopOutLevel": 30
+  }
+}
+              </code></pre>
+            </p>
+            <h3><a class="anchor" name="notification-execution-reports">Notification: Execution reports</a></h3>
+            <p>
+              Execution reports are sent by TickTrader Server during life time of all trade. 
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "Accepted",
+    "Trade": {
+      "Id": 769021,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Market",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "New",
+      "Symbol": "EURUSD",
+      "Price": 1.12539,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Created": 1444143232606,
+      "Comment": "WebSocket API market"
+    }
+  }
+}
+              </code></pre>
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "Filled",
+    "Trade": {
+      "Id": 769021,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Market",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Filled",
+      "Symbol": "EURUSD",
+      "Price": 1.12539,
+      "Amount": 0,
+      "InitialAmount": 100000,
+      "Created": 1444143232606,
+      "Modified": 1444143232614,
+      "Filled": 1444143232614,
+      "Comment": "WebSocket API market"
+    },
+    "Fill": {
+      "Amount": 100000,
+      "Price": 1.12539
+    }
+  }
+}
+              </code></pre>
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "Allocated",
+    "Trade": {
+      "Id": 769021,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Position",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "EURUSD",
+      "Price": 1.12539,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Commission": -5.63,
+      "AgentCommission": 0,
+      "Created": 1444143232606,
+      "Modified": 1444143232614,
+      "Filled": 1444143232614,
+      "PositionCreated": 1444143232614,
+      "Comment": "WebSocket API market"
+    }
+  }
+}
+              </code></pre>
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "PendingModify",
+    "Trade": {
+      "Id": 769022,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Position",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "EURUSD",
+      "Price": 1.127,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Commission": -5.64,
+      "AgentCommission": 0,
+      "Created": 1444148517905,
+      "Modified": 1444148517918,
+      "Filled": 1444148517918,
+      "PositionCreated": 1444148517918,
+      "Comment": "WebSocket API market"
+    }
+  }
+}
+              </code></pre>
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "Modified",
+    "Trade": {
+      "Id": 769022,
+      "ClientId": "client-market-2FD798ED-4444-4385-AAC3-11B590699D21",
+      "AccountId": 5,
+      "Type": "Position",
+      "InitialType": "Market",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "EURUSD",
+      "Price": 1.127,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Commission": -5.64,
+      "AgentCommission": 0,
+      "Created": 1444148517905,
+      "Modified": 1444148673132,
+      "Filled": 1444148517918,
+      "PositionCreated": 1444148517918,
+      "Comment": "Modified trade"
+    }
+  }
+}
+              </code></pre>
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "PendingCancel",
+    "Trade": {
+      "Id": 769028,
+      "ClientId": "client-limit-3AE8716F-0EA9-43ED-A638-21AD054056CB",
+      "AccountId": 5,
+      "Type": "Limit",
+      "InitialType": "Limit",
+      "Side": "Buy",
+      "Status": "Calculated",
+      "Symbol": "EURUSD",
+      "Price": 1,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Created": 1444215160806,
+      "Modified": 1444215160814,
+      "Comment": "WebSocket API limit"
+    }
+  }
+}
+              </code></pre>
+              <pre class="code"><code>
+{
+  "Id": "EBBDCD41-6BD9-4365-B6A7-7074DC433A3A",
+  "Response": "ExecutionReport",
+  "Result": {
+    "Event": "Canceled",
+    "Trade": {
+      "Id": 769028,
+      "ClientId": "client-limit-3AE8716F-0EA9-43ED-A638-21AD054056CB",
+      "AccountId": 5,
+      "Type": "Limit",
+      "InitialType": "Limit",
+      "Side": "Buy",
+      "Status": "Canceled",
+      "Symbol": "EURUSD",
+      "Price": 1,
+      "Amount": 100000,
+      "InitialAmount": 100000,
+      "Created": 1444215160806,
+      "Modified": 1444215170961,
+      "Comment": "WebSocket API limit"
+    }
+  }
+}
+              </code></pre>
+            </p>
+          </div>          
+      </div>
+      <div id="footer">
+        <div id="footer-copyright">
+          <p>&copy; 2015, Soft-FX</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
