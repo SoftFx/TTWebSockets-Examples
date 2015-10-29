@@ -1,0 +1,388 @@
+<!doctype html>
+<html>
+  <head>
+    <title>TickTrader Feed example</title>
+    <script src="http://code.jquery.com/jquery-2.1.4.min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/core-min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/components/enc-base64-min.js" type='text/javascript'></script>
+    <script src="http://crypto-js.googlecode.com/svn/tags/3.1.2/build/rollups/hmac-sha256.js" type='text/javascript'></script>
+    <meta charset="utf-8"/>
+    <script>
+
+window.onload = Initialize;
+
+function Initialize() {
+  if (!("WebSocket" in window)) {  
+    alert("Sorry, no WebSockets!");
+    return;
+  }
+
+  document.getElementById("webSocketApiConnect").disabled = false;
+
+  var connectButton = document.getElementById("webSocketApiConnect");
+  connectButton.onclick = function() { IsConnected() ? Disconnect() : Connect(); };
+
+  Connect();
+}
+
+function CreateGuid() {
+  // http://www.ietf.org/rfc/rfc4122.txt
+  var s = [];
+  var hexDigits = "0123456789abcdef";
+  for (var i = 0; i < 36; i++) {
+    s[i] = hexDigits.substr(Math.floor(Math.random() * 0x10), 1);
+  }
+  // bits 12-15 of the time_hi_and_version field to 0010
+  s[14] = "4"; 
+  // bits 6-7 of the clock_seq_hi_and_reserved to 01
+  s[19] = hexDigits.substr((s[19] & 0x3) | 0x8, 1);  
+  s[8] = s[13] = s[18] = s[23] = "-";
+  return s.join("");
+}
+
+function WriteConsole(value) {
+  console.log(value);
+}
+
+function CreateSignature(timestamp, id, key, secret) {
+  var hash = CryptoJS.HmacSHA256(timestamp + id + key, secret);
+  return CryptoJS.enc.Base64.stringify(hash);
+}
+
+var logon = false;
+var socket = null;
+
+function IsConnected() {
+  return socket != null;
+}
+
+function IsLogon() {
+  return logon;
+}
+
+function Connect() {
+  try {  
+    var address = document.getElementById("webSocketApiAddress").value;
+    var id = document.getElementById("webSocketApiId").value;
+    var key = document.getElementById("webSocketApiKey").value;
+    var secret = document.getElementById("webSocketApiSecret").value;
+    var timestamp = Date.now();
+    var signature = CreateSignature(timestamp, id, key, secret);
+
+    socket = new WebSocket(address);  
+    WriteConsole('Socket state: ' + socket.readyState); 
+    socket.onopen = function() {
+      document.getElementById("webSocketApiConnect").value = "Disconnect";
+      WriteConsole('Socket state: ' + socket.readyState + ' (open)'); 
+      var request = {
+        Id: CreateGuid(),
+        Request: "Login",
+        Params: {
+          AuthType: "HMAC",
+          WebApiId: id,
+          WebApiKey: key,
+          Timestamp: timestamp,
+          Signature: signature
+        }
+      };
+      Send(request);
+    }  
+    socket.onmessage = function(msg) { 
+      if (!IsLogon())
+        Logon();
+      Recieve(msg.data) 
+    }  
+    socket.onclose = function() {  
+      if (IsLogon())
+        Logout();
+      document.getElementById("webSocketApiConnect").value = "Connect";
+      WriteConsole('Socket state: ' + socket.readyState + ' (closed)');  
+      socket = null;
+    }           
+  } catch(exception) {  
+    WriteConsole('Error: ' + exception.text);
+  }  
+}
+
+function Disconnect() {
+  socket.close();
+}
+
+function Logon() {
+  logon = true;
+  EnableButtons(true);
+  RequestSymbols();
+}
+
+function Logout() {
+  logon = false;
+  EnableButtons(false);
+}
+
+function EnableButtons(enabled) {
+}
+
+function Send(request) {
+  var jsonrequest = JSON.stringify(request);
+  socket.send(jsonrequest);
+  //WriteConsole('Sent: ' + jsonrequest);  
+}
+
+function Recieve(response) {
+  //WriteConsole('Received: ' + response);  
+
+  var resp = JSON.parse(response);
+  switch (resp.Response) {
+    case "Symbols":
+      UpdateSymbols(resp.Result);
+      break;
+    case "FeedTick":
+      UpdateFeedTick(resp.Result);
+      break;
+  }
+}
+
+function RequestSymbols() {
+  var request = {
+    Id: CreateGuid(),
+    Request: "Symbols"
+  };
+  var jsonrequest = JSON.stringify(request);
+  socket.send(jsonrequest);
+}
+
+function UpdateSymbols(symbols) {
+  symbols = symbols.Symbols;
+
+  // Create ticks control
+  $('#ticks').children().remove();
+  $('#ticks').append('<table style="width:100%;"><thead><tr><th>Symbol</th><th>Bid Price</th><th>Bid Volume</th><th>Ask Price</th><th>Ask Volume</th></tr></thead></table>');
+  var table = $('#ticks').children();
+  var tbody = table.append('<tbody>');
+  for (index in symbols) {
+    var trow = '';
+    var tick = symbols[index];
+    trow += '<td>' + tick['Symbol'] + '</td>';
+    trow += '<td>' + '-' + '</td>';
+    trow += '<td>' + '-' + '</td>';
+    trow += '<td>' + '-' + '</td>';
+    trow += '<td>' + '-' + '</td>';
+    tbody.append('<tr id="' + tick['Symbol'].replace('#', '') + '">' + trow + '</tr>');
+  }
+
+  // Fill level2symbol control
+  var options = $('#level2symbol');
+  for (index in symbols) {
+    var symbol = symbols[index];
+    var option = '<option>' + symbol['Symbol'] + '</option>';
+    options.append(option);
+  }
+
+  // Subscribe to symbols
+  for (index in symbols) {
+    var symbol = symbols[index];
+    SubscribeToSymbol(symbol['Symbol']);
+  }
+}
+
+function UpdateFeedTick(tick) {
+  var symbol = tick['Symbol'];
+
+  // Update ticks control
+  var symbolid = symbol.replace('#', '');
+  $('#' + symbolid).children().remove();
+  var trow = '';
+  trow += '<td>' + symbol + '</td>';
+  trow += '<td>' + tick['BestBid']['Price'] + '</td>';
+  trow += '<td>' + tick['BestBid']['Volume'] + '</td>';
+  trow += '<td>' + tick['BestAsk']['Price'] + '</td>';
+  trow += '<td>' + tick['BestAsk']['Volume'] + '</td>';
+  $('#' + symbolid).append(trow);
+
+  // Update level2 control
+  if (symbol == $('#level2symbol').val()) {
+    $('#level2').children().remove();
+    $('#level2').append('<table style="width:100%"><thead><tr><th>Bid</th><th>Price</th><th>Ask</th></tr></thead></table>');
+    var table = $('#level2').children();
+    var tbody = table.append('<tbody>');
+    var asks = tick['Asks'].sort(function (a, b) { return b['Price'] - a['Price'] });
+    for (index in asks) {
+      var trow = '';
+      var asktick = asks[index];
+      trow += '<td></td>';
+      trow += '<td style="background: #FFE4FF;">' + asktick['Price'] + '</td>';
+      trow += '<td style="background: #FFE4FF;">' + asktick['Volume'] + '</td>';
+      tbody.append('<tr>' + trow + '</tr>');
+    }
+    var bids = tick['Bids'].sort(function (a, b) { return b['Price'] - a['Price'] });
+    for (index in bids) {
+      var trow = '';
+      var bidtick = bids[index];
+      trow += '<td style="background: #C0FFC0;">' + bidtick['Volume'] + '</td>';
+      trow += '<td style="background: #C0FFC0;">' + bidtick['Price'] + '</td>';
+      trow += '<td></td>';
+      tbody.append('<tr>' + trow + '</tr>');
+    }    
+  }
+}
+
+function SelectSymbolLevel2(list) {
+  var idx = list.selectedIndex;
+  var content = list.options[idx].innerHTML;
+  $('#level2').children().remove();
+}
+
+function SubscribeToSymbol(symbol) {
+  var request = {
+    Id: CreateGuid(),
+    Request: "FeedSubscribe",
+    Params: {
+      Subscribe: [{
+        Symbol: symbol,
+        BookDepth: 5
+      }]
+    }
+  };
+  var jsonrequest = JSON.stringify(request);
+  socket.send(jsonrequest);
+}
+
+    </script>
+    <style>
+
+html {
+  height: 100%;
+}
+body {
+  margin: 0; 
+  padding: 0; 
+  height: 100%;
+}
+.anchor { 
+}
+.code { 
+  background: #F8F8FF; 
+  border: black dashed 1px; 
+  padding: 6px
+}
+#wrapper {
+  width: 100%;
+  min-width: 1250px;
+  min-height: 100%;
+  margin: auto;
+  position: relative;
+}
+* html #wrap {
+  height: 100%
+}
+#inner-wrap {
+  padding-bottom: 85px;
+}
+#inner-wrap:after {
+  content: " ";
+  display: block;
+  clear: both;
+}
+* html #inner-wrap {
+  height: 1px;
+}
+#header {
+  background: #0F6AB4;
+  border-radius: 0px 0px 10px 10px;
+  position: fixed; 
+  top: 0;
+  height: 80px !important;
+  width: 100%;
+  min-width: 1250px;
+  margin: 0px 20px 25px 20px;
+}
+#header-title {
+  float: left;
+  color: white;
+  font-size: large;
+  padding: 25px 20px 0px 20px;
+}
+#login-form {
+  margin: 25px 40px 0px 20px;
+  float: right;
+}
+#webSocketApiAddress {
+  width: 260px;
+}
+#webSocketApiId {
+  width: 260px;
+}
+#webSocketApiKey {
+  width: 150px;
+}
+#webSocketApiSecret {
+  width: 200px;
+}
+#webSocketApiConnect {
+  width: 100px;
+}
+#content {
+  margin-top: 100px;
+  margin-left: 30px;
+  margin-right: 30px;
+}
+#content-ticks {
+  display: block;
+  float:left; 
+  width: 400px;
+}
+#content-level2 {
+  display: block;
+  float:left; 
+  width: 400px;
+  margin-left: 30px;
+}
+#footer {
+  background: #0F6AB4;
+  position: absolute;
+  width: 100%;
+  left: 0px;
+  bottom: 0px;
+  margin: 25px 0px 0px 0px;
+}
+#footer-copyright {
+  color: white;
+  margin: 0px 20px 0px 20px;
+}
+
+    </style>
+  </head>
+  <body>
+    <div id="wrapper">
+      <div id="header">
+        <div id="header-title">TickTrader Feed</div>
+        <form id="login-form">
+          <input placeholder="wss://ttdemowebapi.soft-fx.com:2083" id="webSocketApiAddress" name="webSocketApiAddress" type="text" value="wss://ttdemowebapi.soft-fx.com:2083"/>
+          <input placeholder="Web API Id" id="webSocketApiId" name="webSocketApiId" type="text" value="959ff7bb-d8bd-4a14-a35f-eff46133a3ab"/>
+          <input placeholder="Web API Key" id="webSocketApiKey" name="webSocketApiKey" type="text" value="GEKwJ2GGeFY45GZZ"/>
+          <input placeholder="Web API Secret" id="webSocketApiSecret" name="webSocketApiSecret" type="text" value="SdbatQDE5XH8Mjt5nprPdfRz2CnYPRbX5HFMffpCpfpRw8nfKDgKXkDMwMj2CP2m"/>
+          <input id="webSocketApiConnect" type="button" value="Connect" disabled="true"/>
+        </form>
+      </div>
+      <div id="inner-wrap">
+        <div id="content">
+          <div id="content-ticks" style="display: block; float: left;">
+              <h1>Feed Ticks</h1>
+              <div id='ticks'></div>
+          </div>
+          <div id="content-level2" style="display: block; float: left;">
+              <h1>Level2</h1>
+              <div style="padding-right: 5px; float:left;"><select id='level2symbol' onchange="SelectSymbolLevel2(this);" style="width: 200px;"></select></div>
+              <br/><br/>
+              <div id='level2'></div>
+          </div>
+        </div>
+      </div>
+      <div id="footer">
+        <div id="footer-copyright">
+          <p>&copy; 2015, Soft-FX</p>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
